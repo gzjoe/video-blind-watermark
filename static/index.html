@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>视频盲水印系统</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+    h1 { color: #333; }
+    section { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 24px; }
+    label { display: block; margin: 10px 0 5px; font-weight: 500; }
+    input[type="text"], input[type="file"] { width: 100%; padding: 8px; box-sizing: border-box; }
+    button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+    button:hover { background: #0056b3; }
+    .status { margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 4px; }
+    .success { color: green; }
+    .error { color: red; }
+    #extractResult { white-space: pre-wrap; background: #fff; padding: 10px; border: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <h1>视频盲水印系统</h1>
+  <p>上传视频，嵌入自定义盲水印（每一帧），支持从截图提取。</p>
+
+  <section>
+    <h2>1. 上传视频并嵌入水印</h2>
+    <form id="uploadForm">
+      <label>选择视频文件</label>
+      <input type="file" name="file" accept="video/*" required>
+      <label>水印信息（日期 / 用户名 / 设备ID 等）</label>
+      <input type="text" name="watermark_text" placeholder="例如：2026-10-11|zhangsan|DEV-a1b2c3" required>
+      <button type="submit">开始处理</button>
+    </form>
+    <div id="uploadStatus" class="status" style="display:none;"></div>
+  </section>
+
+  <section>
+    <h2>2. 查询任务状态 / 下载</h2>
+    <input type="text" id="taskIdInput" placeholder="输入任务 ID">
+    <button onclick="checkStatus()">查询状态</button>
+    <div id="statusResult" class="status" style="display:none;"></div>
+  </section>
+
+  <section>
+    <h2>3. 从截图提取水印</h2>
+    <form id="extractForm">
+      <label>上传截图</label>
+      <input type="file" name="file" accept="image/*" required>
+      <label>任务 ID（推荐，自动匹配参数）</label>
+      <input type="text" name="task_id" placeholder="可选，填写后无需手动填长度">
+      <label>或手动填写水印比特长度</label>
+      <input type="number" name="wm_bit_len" placeholder="如果没有任务 ID，则必须填写">
+      <button type="submit">提取水印</button>
+    </form>
+    <div id="extractResult" style="margin-top:15px; display:none;"></div>
+  </section>
+
+  <script>
+    const uploadForm = document.getElementById('uploadForm');
+    const uploadStatus = document.getElementById('uploadStatus');
+
+    uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(uploadForm);
+      uploadStatus.style.display = 'block';
+      uploadStatus.textContent = '正在上传并提交任务...';
+
+      try {
+        const res = await fetch('/api/videos', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '上传失败');
+        uploadStatus.innerHTML = `<span class="success">任务已提交！任务 ID：<b>${data.task_id}</b><br>请稍后查询状态。</span>`;
+        document.getElementById('taskIdInput').value = data.task_id;
+      } catch (err) {
+        uploadStatus.innerHTML = `<span class="error">错误：${err.message}</span>`;
+      }
+    });
+
+    async function checkStatus() {
+      const taskId = document.getElementById('taskIdInput').value.trim();
+      if (!taskId) return alert('请输入任务 ID');
+      const box = document.getElementById('statusResult');
+      box.style.display = 'block';
+      box.textContent = '查询中...';
+
+      try {
+        const res = await fetch(`/api/videos/${taskId}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '查询失败');
+
+        let html = `状态：<b>${data.status}</b><br>`;
+        html += `原始文件：${data.original_filename}<br>`;
+        html += `水印内容：${data.watermark_text}<br>`;
+        if (data.wm_bit_len) html += `水印长度：${data.wm_bit_len}<br>`;
+        if (data.error_message) html += `<span class="error">错误：${data.error_message}</span><br>`;
+        if (data.status === 'completed') {
+          html += `<a href="/api/videos/${taskId}/download" target="_blank">下载水印视频</a>`;
+        }
+        box.innerHTML = html;
+      } catch (err) {
+        box.innerHTML = `<span class="error">${err.message}</span>`;
+      }
+    }
+
+    document.getElementById('extractForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const resultBox = document.getElementById('extractResult');
+      resultBox.style.display = 'block';
+      resultBox.textContent = '提取中...';
+
+      try {
+        const res = await fetch('/api/extract', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '提取失败');
+        resultBox.innerHTML = `<b>提取结果：</b><br>${data.watermark || '(空)'}`;
+      } catch (err) {
+        resultBox.innerHTML = `<span class="error">错误：${err.message}</span>`;
+      }
+    });
+  </script>
+</body>
+</html>
