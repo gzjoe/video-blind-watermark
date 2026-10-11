@@ -1,134 +1,92 @@
-# Video Blind Watermark Web System
+# Video Blind Watermark System
 
-给上传的视频每一帧嵌入自定义盲水印（Invisible Watermark），并支持从截图中提取水印信息。
+视频盲水印系统，拆分为两个独立组件，支持分开部署：
 
-盲水印肉眼不可见，可用于版权溯源、用户追踪、设备绑定等场景。
+1. **Embed Service（嵌入服务）**：独立 Web 系统，负责上传视频并给每一帧嵌入自定义盲水印
+2. **Extract Service（提取组件）**：轻量组件，部署在另一台 Ubuntu 上，从截图中提取水印
 
-## 功能特性
+## 架构
 
-- **逐帧盲水印嵌入**：使用 FFmpeg 拆帧 + `blind-watermark` 库为每一帧嵌入自定义文本
-- **自定义水印内容**：支持日期、用户名、设备 ID、订单号等任意文本
-- **截图提取**：从视频截图中提取水印（高清截图成功率较高）
-- **Web 界面**：简单的上传、查询、提取页面
-- **异步处理**：后台任务处理，避免阻塞请求
-- **Docker 支持**：一键启动，无需手动安装依赖
+```
+┌─────────────────────┐         ┌────────────────────┐
+│   Embed Service     │         │   Extract Service   │
+│   (Web 系统)         │         │   (Ubuntu 组件)      │
+│                     │         │                     │
+│  - 上传视频          │  参数   │  - 接收截图          │
+│  - 逐帧嵌入盲水印     │ ──────> │  - 提取水印          │
+│  - 返回提取参数       │         │  - 返回水印内容      │
+│  - 下载水印视频       │         │                     │
+└─────────────────────┘         └────────────────────┘
+     端口 8000                       端口 8001
+```
 
-## 技术栈
+两个服务通过**约定的密码参数**（`password_img`、`password_wm`、`wm_bit_len`）协作，无需共享数据库。
 
-| 组件 | 说明 |
-|------|------|
-| FastAPI | Web 框架 |
-| FFmpeg | 视频拆帧与合成 |
-| blind-watermark | 盲水印算法（guofei9987） |
-| SQLite | 任务与参数记录 |
-| Docker | 容器化部署 |
+## 快速开始
 
-## 快速开始（Docker）
+### 1. 启动嵌入服务（Embed Service）
 
 ```bash
-# 克隆仓库
-git clone https://github.com/gzjoe/video-blind-watermark.git
-cd video-blind-watermark
-
-# 构建并启动
+cd embed-service
 docker compose up --build
-
-# 访问
-# http://localhost:8000
 ```
 
-## 本地安装（非 Docker）
+访问 http://localhost:8000
 
-### 系统依赖
+### 2. 启动提取服务（Extract Service）
+
+在另一台 Ubuntu 上：
 
 ```bash
-# Ubuntu / Debian
-sudo apt update && sudo apt install -y ffmpeg python3-pip
-
-# macOS
-brew install ffmpeg
+cd extract-service
+docker compose up --build
 ```
 
-### Python 依赖
+服务监听 http://localhost:8001
+
+## 使用流程
+
+1. 在 **Embed Service** 上传视频并填写水印文本
+2. 查询任务状态，获取提取参数：
+   - `password_img`
+   - `password_wm`
+   - `wm_bit_len`
+3. 下载水印视频
+4. 在 **Extract Service** 上传视频截图，并提交上述三个参数，即可提取水印
+
+### 提取示例
 
 ```bash
-pip install -r requirements.txt
-```
-
-### 启动服务
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-浏览器打开 http://localhost:8000
-
-## API 说明
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/api/videos` | 上传视频并嵌入水印（表单：`file` + `watermark_text`） |
-| `GET` | `/api/videos/{task_id}` | 查询任务状态 |
-| `GET` | `/api/videos/{task_id}/download` | 下载处理后的水印视频 |
-| `POST` | `/api/extract` | 上传截图提取水印（表单：`file` + `task_id` 或 `wm_bit_len`） |
-
-### 示例：上传视频
-
-```bash
-curl -X POST http://localhost:8000/api/videos \
-  -F "file=@example.mp4" \
-  -F "watermark_text=2026-10-11|user123|DEV-abc"
-```
-
-### 示例：提取水印
-
-```bash
-curl -X POST http://localhost:8000/api/extract \
+curl -X POST http://EXTRACT_SERVER:8001/api/extract \
   -F "file=@screenshot.png" \
-  -F "task_id=你的任务ID"
+  -F "password_img=1234" \
+  -F "password_wm=5678" \
+  -F "wm_bit_len=XXX"
 ```
 
-## 项目结构
+## 目录结构
 
 ```
-video-blind-watermark/
-├── app/
-│   ├── main.py          # FastAPI 主程序
-│   ├── watermark.py     # 水印嵌入/提取逻辑
-│   └── database.py      # SQLite 任务记录
-├── static/
-│   └── index.html       # 前端页面
-├── uploads/             # 临时上传目录（运行时创建）
-├── outputs/             # 输出视频目录（运行时创建）
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
+.
+├── embed-service/          # 嵌入服务（独立 Web 系统）
+│   ├── app/
+│   ├── static/
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── extract-service/        # 提取组件（独立部署）
+│   ├── app/
+│   ├── Dockerfile
+│   └── docker-compose.yml
 ├── LICENSE
 └── README.md
 ```
 
 ## 注意事项
 
-1. **处理速度**  
-   逐帧嵌入计算量较大，长视频可能需要数分钟。建议使用异步队列（当前使用 FastAPI BackgroundTasks）。
-
-2. **截图提取可靠性**  
-   - 高清截图（PNG 或高质量 JPEG）：成功率较高  
-   - 轻度压缩：多数情况可提取  
-   - 重度压缩 / 社交平台转发：经常失败
-
-3. **水印容量**  
-   普通 1080p 帧大约可嵌入几十到一两百字符，建议控制在 100 字符以内。
-
-4. **密码管理**  
-   当前使用固定密码（`1234` / `5678`）。生产环境建议按任务随机生成并安全存储。
-
-5. **资源占用**  
-   处理过程中会临时占用磁盘空间（拆帧），处理完成后自动清理。
-
-## 开发与贡献
-
-欢迎提交 Issue 和 Pull Request。
+1. **密码一致性**：两个服务必须使用相同的 `password_img` 和 `password_wm`（当前默认均为 1234 / 5678）
+2. **wm_bit_len**：由嵌入服务生成并返回，提取时必须准确提供
+3. **截图质量**：高清截图成功率较高，重度压缩可能失败
+4. **处理速度**：逐帧嵌入较慢，长视频需等待
 
 ## License
 
